@@ -190,7 +190,7 @@ function successPage(accessToken, sessionId) {
   <div class="card">
     <div class="check">&#10003;</div>
     <h1>Signed in!</h1>
-    <p>Return to Figma to continue.</p>
+    <p>Returning to Figma...</p>
   </div>
   <script>
     // Try postMessage (may not work in Figma sandbox)
@@ -201,10 +201,15 @@ function successPage(accessToken, sessionId) {
         console.log('postMessage failed:', e);
       }
     }
-    // Auto-close after delay
+    // Redirect to Figma and close window
     setTimeout(() => {
-      window.close();
-    }, 2000);
+      // Open Figma using deep link protocol
+      window.location.href = 'figma://';
+      // Close this window after a short delay
+      setTimeout(() => {
+        window.close();
+      }, 500);
+    }, 1000);
   </script>
 </body>
 </html>`;
