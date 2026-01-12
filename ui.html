@@ -781,9 +781,18 @@
 
     function processTextContent(text) {
       const runs = [];
+      let currentAlignment = 'START'; // Default alignment
 
       if (text.textElements) {
         for (const textElement of text.textElements) {
+          // Check for paragraph marker which contains alignment info
+          if (textElement.paragraphMarker) {
+            const paragraphStyle = textElement.paragraphMarker.style || {};
+            if (paragraphStyle.alignment) {
+              currentAlignment = paragraphStyle.alignment;
+            }
+          }
+
           if (textElement.textRun) {
             const run = textElement.textRun;
             const style = run.style || {};
@@ -792,7 +801,7 @@
             let fontFamily = style.fontFamily || 'Arial';
             let fontSize = 14;
             if (style.fontSize?.magnitude) {
-              fontSize = style.fontSize.magnitude * (style.fontSize.unit === 'PT' ? 1 : 1);
+              fontSize = style.fontSize.magnitude;
             }
 
             // Determine font weight and style
@@ -813,13 +822,17 @@
               fontStyle: fontStyle,
               color: textColor,
               underline: style.underline || false,
-              strikethrough: style.strikethrough || false
+              strikethrough: style.strikethrough || false,
+              alignment: currentAlignment
             });
           }
         }
       }
 
-      return { runs: runs };
+      // Determine overall alignment (use first run's alignment, or most common)
+      const alignment = runs.length > 0 ? runs[0].alignment : 'START';
+
+      return { runs: runs, alignment: alignment };
     }
 
     function convertColor(color) {

@@ -16,10 +16,12 @@ interface TextRun {
   color: ColorRGB;
   underline: boolean;
   strikethrough: boolean;
+  alignment?: string;
 }
 
 interface TextContent {
   runs: TextRun[];
+  alignment?: string;
 }
 
 interface SlideElement {
@@ -285,13 +287,11 @@ async function createTextForShape(
 ) {
   if (!element.text) return;
 
-  const textNode = figma.createText();
-  textNode.x = x + 8; // Padding
-  textNode.y = y + 8;
-
   // Combine all text runs
   const fullText = element.text.runs.map(r => r.text).join('');
   if (!fullText.trim()) return;
+
+  const textNode = figma.createText();
 
   // Load fonts and set text
   const firstRun = element.text.runs[0];
@@ -302,9 +302,33 @@ async function createTextForShape(
   textNode.fontSize = firstRun.fontSize || 14;
   textNode.fills = [{ type: 'SOLID', color: firstRun.color }];
 
-  // Set text box size
-  textNode.resize(Math.max(1, width - 16), Math.max(1, height - 16));
-  textNode.textAutoResize = 'HEIGHT';
+  // Set text box to fill the shape with small padding
+  const padding = 4;
+  textNode.resize(Math.max(1, width - padding * 2), Math.max(1, height - padding * 2));
+  textNode.x = x + padding;
+  textNode.y = y + padding;
+
+  // Apply text alignment based on Google Slides alignment
+  const alignment = element.text.alignment || 'START';
+  switch (alignment) {
+    case 'CENTER':
+      textNode.textAlignHorizontal = 'CENTER';
+      break;
+    case 'END':
+      textNode.textAlignHorizontal = 'RIGHT';
+      break;
+    case 'JUSTIFIED':
+      textNode.textAlignHorizontal = 'JUSTIFIED';
+      break;
+    case 'START':
+    default:
+      textNode.textAlignHorizontal = 'LEFT';
+      break;
+  }
+
+  // Center text vertically within the shape
+  textNode.textAlignVertical = 'CENTER';
+  textNode.textAutoResize = 'NONE';
 
   // Apply rotation if needed
   if (element.rotation && element.rotation !== 0) {
