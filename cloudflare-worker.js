@@ -6,6 +6,17 @@
  * Environment variables to set in Cloudflare dashboard:
  * - GOOGLE_CLIENT_ID: Your Google OAuth Client ID
  * - GOOGLE_CLIENT_SECRET: Your Google OAuth Client Secret
+ *
+ * KV Namespace binding required:
+ * - TOKEN_STORE: A KV namespace for temporary token storage
+ *
+ * To create KV namespace:
+ * 1. Go to Workers & Pages > KV
+ * 2. Create a namespace called "gslides-tokens"
+ * 3. Go to your Worker > Settings > Variables
+ * 4. Under "KV Namespace Bindings", add:
+ *    - Variable name: TOKEN_STORE
+ *    - KV namespace: gslides-tokens
  */
 
 const SCOPES = [
@@ -14,18 +25,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.profile'
 ].join(' ');
 
-// In-memory token storage (tokens expire after 5 minutes)
-const tokenStore = new Map();
-const TOKEN_TTL = 5 * 60 * 1000; // 5 minutes
-
-function cleanExpiredTokens() {
-  const now = Date.now();
-  for (const [key, value] of tokenStore.entries()) {
-    if (now - value.timestamp > TOKEN_TTL) {
-      tokenStore.delete(key);
-    }
-  }
-}
+const TOKEN_TTL = 300; // 5 minutes in seconds
 
 export default {
   async fetch(request, env) {
@@ -42,9 +42,6 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers: corsHeaders });
     }
-
-    // Clean expired tokens periodically
-    cleanExpiredTokens();
 
     // Route: Start OAuth flow
     if (url.pathname === '/auth') {
@@ -103,11 +100,10 @@ export default {
           });
         }
 
-        // Store token with session ID for polling
-        if (sessionId) {
-          tokenStore.set(sessionId, {
-            accessToken: tokens.access_token,
-            timestamp: Date.now()
+        // Store token with session ID in KV for polling
+        if (sessionId && env.TOKEN_STORE) {
+          await env.TOKEN_STORE.put(sessionId, tokens.access_token, {
+            expirationTtl: TOKEN_TTL
           });
         }
 
@@ -134,23 +130,40 @@ export default {
         });
       }
 
-      const stored = tokenStore.get(sessionId);
-
-      if (stored) {
-        // Return token and delete from store (one-time use)
-        tokenStore.delete(sessionId);
+      // Check if KV is configured
+      if (!env.TOKEN_STORE) {
         return new Response(JSON.stringify({
-          success: true,
-          accessToken: stored.accessToken
+          error: 'KV storage not configured. Please set up TOKEN_STORE KV binding.'
         }), {
+          status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         });
       }
 
-      // Token not ready yet
-      return new Response(JSON.stringify({ success: false, pending: true }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+      try {
+        const token = await env.TOKEN_STORE.get(sessionId);
+
+        if (token) {
+          // Delete token after retrieval (one-time use)
+          await env.TOKEN_STORE.delete(sessionId);
+          return new Response(JSON.stringify({
+            success: true,
+            accessToken: token
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+
+        // Token not ready yet
+        return new Response(JSON.stringify({ success: false, pending: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     // Default: show info
@@ -198,7 +211,6 @@ function successPage(accessToken, sessionId) {
 }
 
 function errorPage(error, sessionId) {
-  // Store error for polling if session exists
   return `<!DOCTYPE html>
 <html>
 <head>
