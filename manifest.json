@@ -1,0 +1,23 @@
+{
+  "name": "GSlides → Figma",
+  "id": "1592669043747624582",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": [
+    "figma"
+  ],
+  "ui": "ui.html",
+  "networkAccess": {
+    "allowedDomains": [
+      "https://accounts.google.com",
+      "https://www.googleapis.com",
+      "https://slides.googleapis.com",
+      "https://*.googleusercontent.com",
+      "https://*.gstatic.com",
+      "https://*.workers.dev"
+    ]
+  }
+}
