@@ -1,5 +1,11 @@
 {
   "name": "gslides-to-figma",
   "main": "cloudflare-worker.js",
-  "compatibility_date": "2024-01-01"
+  "compatibility_date": "2024-01-01",
+  "kv_namespaces": [
+    {
+      "binding": "TOKEN_STORE",
+      "id": "ebd6f906dc6143caa4a805aa9525296b"
+    }
+  ]
 }

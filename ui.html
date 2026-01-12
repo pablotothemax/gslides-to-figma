@@ -783,13 +783,18 @@
       const runs = [];
       let currentAlignment = 'START'; // Default alignment
 
+      // Debug: log the raw text structure
+      console.log('Raw text structure:', JSON.stringify(text, null, 2));
+
       if (text.textElements) {
         for (const textElement of text.textElements) {
           // Check for paragraph marker which contains alignment info
           if (textElement.paragraphMarker) {
             const paragraphStyle = textElement.paragraphMarker.style || {};
+            console.log('Paragraph style:', paragraphStyle);
             if (paragraphStyle.alignment) {
               currentAlignment = paragraphStyle.alignment;
+              console.log('Found alignment:', currentAlignment);
             }
           }
 
@@ -797,11 +802,15 @@
             const run = textElement.textRun;
             const style = run.style || {};
 
+            console.log('TextRun style:', style);
+            console.log('FontSize object:', style.fontSize);
+
             // Get font info
             let fontFamily = style.fontFamily || 'Arial';
             let fontSize = 14;
             if (style.fontSize?.magnitude) {
               fontSize = style.fontSize.magnitude;
+              console.log('Extracted fontSize:', fontSize);
             }
 
             // Determine font weight and style
@@ -831,6 +840,9 @@
 
       // Determine overall alignment (use first run's alignment, or most common)
       const alignment = runs.length > 0 ? runs[0].alignment : 'START';
+
+      console.log('Processed runs:', runs);
+      console.log('Final alignment:', alignment);
 
       return { runs: runs, alignment: alignment };
     }
