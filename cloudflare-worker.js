@@ -14,6 +14,19 @@ const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.profile'
 ].join(' ');
 
+// In-memory token storage (tokens expire after 5 minutes)
+const tokenStore = new Map();
+const TOKEN_TTL = 5 * 60 * 1000; // 5 minutes
+
+function cleanExpiredTokens() {
+  const now = Date.now();
+  for (const [key, value] of tokenStore.entries()) {
+    if (now - value.timestamp > TOKEN_TTL) {
+      tokenStore.delete(key);
+    }
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -30,8 +43,12 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
+    // Clean expired tokens periodically
+    cleanExpiredTokens();
+
     // Route: Start OAuth flow
     if (url.pathname === '/auth') {
+      const sessionId = url.searchParams.get('session') || '';
       const redirectUri = `${url.origin}/callback`;
       const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
       authUrl.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
@@ -40,6 +57,7 @@ export default {
       authUrl.searchParams.set('scope', SCOPES);
       authUrl.searchParams.set('access_type', 'offline');
       authUrl.searchParams.set('prompt', 'consent');
+      authUrl.searchParams.set('state', sessionId); // Pass session ID through OAuth state
 
       return Response.redirect(authUrl.toString(), 302);
     }
@@ -48,15 +66,16 @@ export default {
     if (url.pathname === '/callback') {
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
+      const sessionId = url.searchParams.get('state') || '';
 
       if (error) {
-        return new Response(errorPage(error), {
+        return new Response(errorPage(error, sessionId), {
           headers: { 'Content-Type': 'text/html' }
         });
       }
 
       if (!code) {
-        return new Response(errorPage('No authorization code received'), {
+        return new Response(errorPage('No authorization code received', sessionId), {
           headers: { 'Content-Type': 'text/html' }
         });
       }
@@ -79,21 +98,59 @@ export default {
         const tokens = await tokenResponse.json();
 
         if (tokens.error) {
-          return new Response(errorPage(tokens.error_description || tokens.error), {
+          return new Response(errorPage(tokens.error_description || tokens.error, sessionId), {
             headers: { 'Content-Type': 'text/html' }
           });
         }
 
-        // Return success page that sends token to opener
-        return new Response(successPage(tokens.access_token), {
+        // Store token with session ID for polling
+        if (sessionId) {
+          tokenStore.set(sessionId, {
+            accessToken: tokens.access_token,
+            timestamp: Date.now()
+          });
+        }
+
+        // Return success page
+        return new Response(successPage(tokens.access_token, sessionId), {
           headers: { 'Content-Type': 'text/html' }
         });
 
       } catch (err) {
-        return new Response(errorPage(err.message), {
+        return new Response(errorPage(err.message, sessionId), {
           headers: { 'Content-Type': 'text/html' }
         });
       }
+    }
+
+    // Route: Poll for token
+    if (url.pathname === '/token') {
+      const sessionId = url.searchParams.get('session');
+
+      if (!sessionId) {
+        return new Response(JSON.stringify({ error: 'Missing session ID' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      const stored = tokenStore.get(sessionId);
+
+      if (stored) {
+        // Return token and delete from store (one-time use)
+        tokenStore.delete(sessionId);
+        return new Response(JSON.stringify({
+          success: true,
+          accessToken: stored.accessToken
+        }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Token not ready yet
+      return new Response(JSON.stringify({ success: false, pending: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     // Default: show info
@@ -103,7 +160,7 @@ export default {
   }
 };
 
-function successPage(accessToken) {
+function successPage(accessToken, sessionId) {
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -113,26 +170,35 @@ function successPage(accessToken) {
     .card { background: white; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
     h1 { color: #1a1a1a; font-size: 24px; margin: 0 0 8px 0; }
     p { color: #666; margin: 0; }
-    .check { font-size: 48px; margin-bottom: 16px; }
+    .check { font-size: 48px; margin-bottom: 16px; color: #34A853; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="check">&#10003;</div>
     <h1>Signed in!</h1>
-    <p>You can close this window.</p>
+    <p>Return to Figma to continue.</p>
   </div>
   <script>
+    // Try postMessage (may not work in Figma sandbox)
     if (window.opener) {
-      window.opener.postMessage({ type: 'oauth-success', accessToken: '${accessToken}' }, '*');
-      setTimeout(() => window.close(), 1500);
+      try {
+        window.opener.postMessage({ type: 'oauth-success', accessToken: '${accessToken}' }, '*');
+      } catch (e) {
+        console.log('postMessage failed:', e);
+      }
     }
+    // Auto-close after delay
+    setTimeout(() => {
+      window.close();
+    }, 2000);
   </script>
 </body>
 </html>`;
 }
 
-function errorPage(error) {
+function errorPage(error, sessionId) {
+  // Store error for polling if session exists
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -141,8 +207,8 @@ function errorPage(error) {
     body { font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }
     .card { background: white; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 400px; }
     h1 { color: #c00; font-size: 24px; margin: 0 0 8px 0; }
-    p { color: #666; margin: 0; }
-    .icon { font-size: 48px; margin-bottom: 16px; }
+    p { color: #666; margin: 0; word-break: break-word; }
+    .icon { font-size: 48px; margin-bottom: 16px; color: #EA4335; }
   </style>
 </head>
 <body>
@@ -153,7 +219,11 @@ function errorPage(error) {
   </div>
   <script>
     if (window.opener) {
-      window.opener.postMessage({ type: 'oauth-error', error: '${error}' }, '*');
+      try {
+        window.opener.postMessage({ type: 'oauth-error', error: '${error}' }, '*');
+      } catch (e) {
+        console.log('postMessage failed:', e);
+      }
     }
   </script>
 </body>

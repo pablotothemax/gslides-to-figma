@@ -251,6 +251,8 @@
     let accessToken = null;
     let userInfo = null;
     let authPopup = null;
+    let authSessionId = null;
+    let pollInterval = null;
 
     // DOM Elements
     const screenAuth = document.getElementById('screen-auth');
@@ -268,9 +270,17 @@
     const userAvatar = document.getElementById('user-avatar');
     const userEmail = document.getElementById('user-email');
 
+    // Generate random session ID
+    function generateSessionId() {
+      return 'sess_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+    }
+
     // Open OAuth popup
     function startAuth() {
       hideError(authError);
+
+      // Generate unique session ID for this auth attempt
+      authSessionId = generateSessionId();
 
       const width = 500;
       const height = 600;
@@ -278,27 +288,90 @@
       const top = (screen.height - height) / 2;
 
       authPopup = window.open(
-        `${OAUTH_WORKER_URL}/auth`,
+        `${OAUTH_WORKER_URL}/auth?session=${authSessionId}`,
         'google-auth',
         `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`
       );
 
-      if (!authPopup) {
-        showError(authError, 'Popup blocked. Please allow popups for this site.');
-      }
+      // Start polling for token
+      startTokenPolling();
     }
 
-    // Handle OAuth callback message from popup
+    // Poll for token from worker
+    function startTokenPolling() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+
+      let pollCount = 0;
+      const maxPolls = 120; // 2 minutes max (every 1 second)
+
+      pollInterval = setInterval(async () => {
+        pollCount++;
+
+        // Check if popup was closed without completing
+        if (authPopup && authPopup.closed) {
+          // Give it a few more polls in case token is still being processed
+          if (pollCount > 5) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+            authPopup = null;
+            // Don't show error - user might have completed auth
+          }
+        }
+
+        // Stop after max polls
+        if (pollCount >= maxPolls) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          if (!accessToken) {
+            showError(authError, 'Authentication timed out. Please try again.');
+          }
+          return;
+        }
+
+        // Poll for token
+        try {
+          const response = await fetch(`${OAUTH_WORKER_URL}/token?session=${authSessionId}`);
+          const data = await response.json();
+
+          if (data.success && data.accessToken) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+            accessToken = data.accessToken;
+
+            if (authPopup && !authPopup.closed) {
+              authPopup.close();
+            }
+            authPopup = null;
+
+            await fetchUserInfo();
+          }
+        } catch (err) {
+          console.log('Poll error:', err);
+        }
+      }, 1000);
+    }
+
+    // Handle messages from plugin code (and fallback for postMessage from popup)
     window.addEventListener('message', async (event) => {
-      // Handle messages from the OAuth popup
-      if (event.data.type === 'oauth-success' && event.data.accessToken) {
+      // Handle messages from the OAuth popup (fallback, may not work)
+      if (event.data.type === 'oauth-success' && event.data.accessToken && !accessToken) {
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
         accessToken = event.data.accessToken;
         if (authPopup) {
           authPopup.close();
           authPopup = null;
         }
         await fetchUserInfo();
-      } else if (event.data.type === 'oauth-error') {
+      } else if (event.data.type === 'oauth-error' && !accessToken) {
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
         if (authPopup) {
           authPopup.close();
           authPopup = null;
