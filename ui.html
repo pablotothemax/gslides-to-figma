@@ -662,6 +662,11 @@
         const shape = element.shape;
         const shapeType = shape.shapeType || 'RECTANGLE';
 
+        // Log full shape data for debugging
+        console.log('Full shape data:', JSON.stringify(shape, null, 2));
+        console.log('Shape placeholder:', element.shape.placeholder);
+        console.log('Element size (pixels):', baseProps.width, 'x', baseProps.height);
+
         // Get fill color
         let fillColor = null;
         if (shape.shapeProperties?.shapeBackgroundFill?.solidFill) {
@@ -676,10 +681,17 @@
           strokeWeight = emuToPixels(shape.shapeProperties.outline.weight?.magnitude) || 1;
         }
 
-        // Process text content
+        // Check for content alignment at shape level
+        let shapeContentAlignment = null;
+        if (shape.shapeProperties?.contentAlignment) {
+          shapeContentAlignment = shape.shapeProperties.contentAlignment;
+          console.log('Shape content alignment:', shapeContentAlignment);
+        }
+
+        // Process text content with element dimensions for fallback sizing
         let textContent = null;
         if (shape.text) {
-          textContent = processTextContent(shape.text);
+          textContent = processTextContent(shape.text, baseProps.height, shapeContentAlignment);
         }
 
         return {
@@ -717,7 +729,7 @@
               for (const cell of row.tableCells) {
                 let cellText = '';
                 if (cell.text) {
-                  const textContent = processTextContent(cell.text);
+                  const textContent = processTextContent(cell.text, 30, null); // Default small size for table cells
                   cellText = textContent.runs.map(r => r.text).join('');
                 }
                 cells.push(cellText);
@@ -779,12 +791,18 @@
       return null;
     }
 
-    function processTextContent(text) {
+    function processTextContent(text, elementHeight = 100, shapeContentAlignment = null) {
       const runs = [];
-      let currentAlignment = 'START'; // Default alignment
+      let currentAlignment = shapeContentAlignment || 'START'; // Use shape alignment as default
 
       // Debug: log the raw text structure
       console.log('Raw text structure:', JSON.stringify(text, null, 2));
+      console.log('Element height for fallback:', elementHeight);
+
+      // Check for body/list default styles
+      if (text.lists) {
+        console.log('Text lists (may contain default styles):', text.lists);
+      }
 
       if (text.textElements) {
         for (const textElement of text.textElements) {
@@ -807,10 +825,28 @@
 
             // Get font info
             let fontFamily = style.fontFamily || 'Arial';
-            let fontSize = 14;
+            let fontSize = null;
+
             if (style.fontSize?.magnitude) {
               fontSize = style.fontSize.magnitude;
-              console.log('Extracted fontSize:', fontSize);
+              console.log('Extracted fontSize from style:', fontSize);
+            }
+
+            // Fallback: estimate font size based on element height if not specified
+            // This is a heuristic for placeholder text that inherits from master slides
+            if (!fontSize) {
+              // Estimate: text typically takes 40-60% of container height for titles
+              // Smaller elements = body text, larger = titles
+              if (elementHeight > 100) {
+                fontSize = Math.min(72, Math.max(24, elementHeight * 0.5));
+                console.log('Estimated fontSize from height:', fontSize);
+              } else if (elementHeight > 50) {
+                fontSize = Math.min(36, Math.max(14, elementHeight * 0.4));
+                console.log('Estimated fontSize from height (medium):', fontSize);
+              } else {
+                fontSize = 14; // Default for small elements
+                console.log('Using default fontSize:', fontSize);
+              }
             }
 
             // Determine font weight and style
@@ -838,8 +874,8 @@
         }
       }
 
-      // Determine overall alignment (use first run's alignment, or most common)
-      const alignment = runs.length > 0 ? runs[0].alignment : 'START';
+      // Determine overall alignment (use first run's alignment, or shape alignment)
+      const alignment = runs.length > 0 ? runs[0].alignment : (shapeContentAlignment || 'START');
 
       console.log('Processed runs:', runs);
       console.log('Final alignment:', alignment);
