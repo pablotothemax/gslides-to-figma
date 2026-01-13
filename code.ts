@@ -14,6 +14,7 @@ interface TextRun {
   fontWeight: number;
   fontStyle: string;
   color: ColorRGB;
+  backgroundColor?: ColorRGB | null;
   underline: boolean;
   strikethrough: boolean;
   alignment?: string;
@@ -300,7 +301,7 @@ async function createTextForShape(
   height: number,
   scale: number = 1
 ) {
-  if (!element.text) return;
+  if (!element.text || !element.text.runs.length) return;
 
   // Combine all text runs
   const fullText = element.text.runs.map(r => r.text).join('');
@@ -308,18 +309,70 @@ async function createTextForShape(
 
   const textNode = figma.createText();
 
-  // Load fonts and set text
-  const firstRun = element.text.runs[0];
-  const fontName = await loadFont(firstRun.fontFamily, firstRun.fontWeight);
+  // First, load all required fonts
+  const fontsToLoad = new Set<string>();
+  for (const run of element.text.runs) {
+    const style = run.fontWeight >= 700 ? 'Bold' : 'Regular';
+    fontsToLoad.add(`${run.fontFamily}|${style}`);
+    if (run.fontStyle === 'italic') {
+      fontsToLoad.add(`${run.fontFamily}|${style === 'Bold' ? 'Bold Italic' : 'Italic'}`);
+    }
+  }
 
-  textNode.fontName = fontName;
+  // Load default font first
+  const firstRun = element.text.runs[0];
+  const isFirstItalic = firstRun.fontStyle === 'italic';
+  const defaultFont = await loadFont(firstRun.fontFamily, firstRun.fontWeight, isFirstItalic);
+  textNode.fontName = defaultFont;
   textNode.characters = fullText;
 
-  // Don't scale font size - use original pt size (scaling the frame is enough)
-  const baseFontSize = firstRun.fontSize || 14;
-  textNode.fontSize = baseFontSize;
+  // Apply scaled font size for entire text first
+  const scaledFontSize = Math.round((firstRun.fontSize || 14) * scale);
+  textNode.fontSize = Math.max(1, scaledFontSize);
 
-  textNode.fills = [{ type: 'SOLID', color: firstRun.color }];
+  // Now apply per-run formatting
+  let charIndex = 0;
+  for (const run of element.text.runs) {
+    const runLength = run.text.length;
+    if (runLength === 0) continue;
+
+    const startIndex = charIndex;
+    const endIndex = charIndex + runLength;
+
+    try {
+      // Load and apply font for this run (with italic support)
+      const isItalic = run.fontStyle === 'italic';
+      const fontName = await loadFont(run.fontFamily, run.fontWeight, isItalic);
+      textNode.setRangeFontName(startIndex, endIndex, fontName);
+
+      // Apply scaled font size
+      const runFontSize = Math.round((run.fontSize || 14) * scale);
+      textNode.setRangeFontSize(startIndex, endIndex, Math.max(1, runFontSize));
+
+      // Apply text color
+      if (run.color) {
+        textNode.setRangeFills(startIndex, endIndex, [{
+          type: 'SOLID',
+          color: run.color
+        }]);
+      }
+
+      // Apply underline
+      if (run.underline) {
+        textNode.setRangeTextDecoration(startIndex, endIndex, 'UNDERLINE');
+      }
+
+      // Apply strikethrough
+      if (run.strikethrough) {
+        textNode.setRangeTextDecoration(startIndex, endIndex, 'STRIKETHROUGH');
+      }
+
+    } catch (err) {
+      console.error('Failed to apply text formatting:', err);
+    }
+
+    charIndex = endIndex;
+  }
 
   // Set text box to fill the shape with small padding (scaled)
   const padding = 4 * scale;
@@ -548,9 +601,18 @@ async function createGroup(
   }
 }
 
-async function loadFont(fontFamily: string, fontWeight: number): Promise<FontName> {
-  // Determine style based on weight
-  const style = fontWeight >= 700 ? 'Bold' : 'Regular';
+async function loadFont(fontFamily: string, fontWeight: number, isItalic: boolean = false): Promise<FontName> {
+  // Determine style based on weight and italic
+  let style: string;
+  if (fontWeight >= 700 && isItalic) {
+    style = 'Bold Italic';
+  } else if (fontWeight >= 700) {
+    style = 'Bold';
+  } else if (isItalic) {
+    style = 'Italic';
+  } else {
+    style = 'Regular';
+  }
 
   // Try to load the exact font
   try {
@@ -558,7 +620,17 @@ async function loadFont(fontFamily: string, fontWeight: number): Promise<FontNam
     await figma.loadFontAsync(fontName);
     return fontName;
   } catch {
-    // Font not available
+    // Font not available, try without italic if it was italic
+    if (isItalic) {
+      try {
+        const fallbackStyle = fontWeight >= 700 ? 'Bold' : 'Regular';
+        const fontName = { family: fontFamily, style: fallbackStyle };
+        await figma.loadFontAsync(fontName);
+        return fontName;
+      } catch {
+        // Continue to other fallbacks
+      }
+    }
   }
 
   // Try fallback from mapping
@@ -569,7 +641,17 @@ async function loadFont(fontFamily: string, fontWeight: number): Promise<FontNam
       await figma.loadFontAsync(fontName);
       return fontName;
     } catch {
-      // Fallback not available either
+      // Try without italic
+      if (isItalic) {
+        try {
+          const fallbackStyle = fontWeight >= 700 ? 'Bold' : 'Regular';
+          const fontName = { family: fallbackFamily, style: fallbackStyle };
+          await figma.loadFontAsync(fontName);
+          return fontName;
+        } catch {
+          // Continue
+        }
+      }
     }
   }
 
@@ -590,6 +672,17 @@ async function loadFont(fontFamily: string, fontWeight: number): Promise<FontNam
       await figma.loadFontAsync(fontName);
       return fontName;
     } catch {
+      // Try without italic
+      if (isItalic) {
+        try {
+          const fallbackStyle = fontWeight >= 700 ? 'Bold' : 'Regular';
+          const fontName = { family: fallback, style: fallbackStyle };
+          await figma.loadFontAsync(fontName);
+          return fontName;
+        } catch {
+          continue;
+        }
+      }
       continue;
     }
   }
