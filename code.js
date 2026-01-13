@@ -213,9 +213,9 @@ function createTextForShape(parent_1, element_1, x_1, y_1, width_1, height_1) {
         const fontName = yield loadFont(firstRun.fontFamily, firstRun.fontWeight);
         textNode.fontName = fontName;
         textNode.characters = fullText;
-        // Apply scale to font size
+        // Don't scale font size - use original pt size (scaling the frame is enough)
         const baseFontSize = firstRun.fontSize || 14;
-        textNode.fontSize = Math.round(baseFontSize * scale);
+        textNode.fontSize = baseFontSize;
         textNode.fills = [{ type: 'SOLID', color: firstRun.color }];
         // Set text box to fill the shape with small padding (scaled)
         const padding = 4 * scale;
@@ -347,7 +347,7 @@ function createTable(parent_1, element_1, x_1, y_1, width_1, height_1) {
         const cellHeight = height / rowCount;
         // Load a default font
         const fontName = yield loadFont('Arial', 400);
-        const fontSize = Math.round(10 * scale);
+        const fontSize = 10; // Don't scale font size
         const padding = 4 * scale;
         for (let row = 0; row < rowCount; row++) {
             for (let col = 0; col < colCount; col++) {

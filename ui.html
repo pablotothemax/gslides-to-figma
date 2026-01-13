@@ -820,21 +820,21 @@
               fontSize = style.fontSize.magnitude;
             }
 
-            // Fallback: use placeholder type to determine font size
+            // Fallback: use placeholder type to determine font size (Google Slides defaults)
             if (!fontSize) {
               switch (placeholderType) {
                 case 'CENTERED_TITLE':
                 case 'TITLE':
-                  fontSize = 44; // Standard title size
+                  fontSize = 28; // Google Slides default title
                   break;
                 case 'SUBTITLE':
-                  fontSize = 22; // Standard subtitle size
+                  fontSize = 14; // Google Slides default subtitle
                   break;
                 case 'BODY':
-                  fontSize = 18; // Standard body size
+                  fontSize = 11; // Google Slides default body
                   break;
                 default:
-                  fontSize = 14; // Default
+                  fontSize = 11; // Default body size
               }
               console.log(`Using placeholder-based fontSize (${placeholderType}):`, fontSize);
             }

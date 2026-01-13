@@ -315,9 +315,9 @@ async function createTextForShape(
   textNode.fontName = fontName;
   textNode.characters = fullText;
 
-  // Apply scale to font size
+  // Don't scale font size - use original pt size (scaling the frame is enough)
   const baseFontSize = firstRun.fontSize || 14;
-  textNode.fontSize = Math.round(baseFontSize * scale);
+  textNode.fontSize = baseFontSize;
 
   textNode.fills = [{ type: 'SOLID', color: firstRun.color }];
 
@@ -488,7 +488,7 @@ async function createTable(
 
   // Load a default font
   const fontName = await loadFont('Arial', 400);
-  const fontSize = Math.round(10 * scale);
+  const fontSize = 10; // Don't scale font size
   const padding = 4 * scale;
 
   for (let row = 0; row < rowCount; row++) {
