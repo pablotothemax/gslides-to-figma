@@ -52,6 +52,7 @@ interface SlideElement {
 
 interface Slide {
   index: number;
+  objectId?: string;
   elements: SlideElement[];
 }
 
@@ -68,6 +69,7 @@ interface ImportMessage {
   type: 'import-slides';
   presentation: Presentation;
   imageData: Record<string, string>;
+  thumbnailData?: Record<string, string>;
 }
 
 // Font fallback mapping
@@ -106,7 +108,7 @@ figma.ui.onmessage = async (msg: ImportMessage | { type: string }) => {
   if (msg.type === 'import-slides') {
     const importMsg = msg as ImportMessage;
     try {
-      await importPresentation(importMsg.presentation, importMsg.imageData);
+      await importPresentation(importMsg.presentation, importMsg.imageData, importMsg.thumbnailData || {});
     } catch (err) {
       figma.ui.postMessage({
         type: 'error',
@@ -118,7 +120,11 @@ figma.ui.onmessage = async (msg: ImportMessage | { type: string }) => {
   }
 };
 
-async function importPresentation(presentation: Presentation, imageData: Record<string, string>) {
+async function importPresentation(
+  presentation: Presentation,
+  imageData: Record<string, string>,
+  thumbnailData: Record<string, string>
+) {
   const slides = presentation.slides;
   const totalSlides = slides.length;
 
@@ -144,7 +150,11 @@ async function importPresentation(presentation: Presentation, imageData: Record<
   console.log(`Original size: ${originalWidth}x${originalHeight}, Scale: ${scale}`);
 
   const createdFrames: FrameNode[] = [];
-  const spacing = 100; // Space between slides
+  const spacing = 50; // Space between slides
+  const rowSpacing = 100; // Space between reference and editable rows
+
+  // Check if we have thumbnails
+  const hasThumbnails = Object.keys(thumbnailData).length > 0;
 
   for (let i = 0; i < slides.length; i++) {
     const slide = slides[i];
@@ -155,12 +165,52 @@ async function importPresentation(presentation: Presentation, imageData: Record<
       text: `Creating slide ${i + 1} of ${totalSlides}...`
     });
 
-    // Create frame for slide at fixed 1920x1080
+    const xPos = i * (targetWidth + spacing);
+
+    // Row 1: Reference thumbnail (if available)
+    if (hasThumbnails && slide.objectId && thumbnailData[slide.objectId]) {
+      const thumbnailFrame = figma.createFrame();
+      thumbnailFrame.name = `Reference ${i + 1}`;
+      thumbnailFrame.resize(targetWidth, targetHeight);
+      thumbnailFrame.x = xPos;
+      thumbnailFrame.y = 0;
+      thumbnailFrame.fills = [{ type: 'SOLID', color: { r: 0.95, g: 0.95, b: 0.95 } }];
+
+      // Add thumbnail image
+      try {
+        const base64Data = thumbnailData[slide.objectId];
+        const matches = base64Data.match(/^data:([^;]+);base64,(.+)$/);
+        if (matches) {
+          const base64Content = matches[2];
+          const bytes = figma.base64Decode(base64Content);
+          const image = figma.createImage(bytes);
+
+          const rect = figma.createRectangle();
+          rect.resize(targetWidth, targetHeight);
+          rect.x = 0;
+          rect.y = 0;
+          rect.fills = [{
+            type: 'IMAGE',
+            imageHash: image.hash,
+            scaleMode: 'FIT'
+          }];
+          rect.name = 'Thumbnail';
+          thumbnailFrame.appendChild(rect);
+        }
+      } catch (err) {
+        console.error('Failed to create thumbnail:', err);
+      }
+
+      figma.currentPage.appendChild(thumbnailFrame);
+      createdFrames.push(thumbnailFrame);
+    }
+
+    // Row 2: Editable slide
     const frame = figma.createFrame();
     frame.name = `Slide ${i + 1}`;
     frame.resize(targetWidth, targetHeight);
-    frame.x = i * (targetWidth + spacing);
-    frame.y = 0;
+    frame.x = xPos;
+    frame.y = hasThumbnails ? targetHeight + rowSpacing : 0;
     frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
 
     // Create elements within the frame with scaling

@@ -512,6 +512,34 @@
       return response.json();
     }
 
+    async function fetchSlideThumbnail(presentationId, pageObjectId) {
+      try {
+        // Request high-resolution thumbnail
+        const response = await fetch(
+          `https://slides.googleapis.com/v1/presentations/${presentationId}/pages/${pageObjectId}/thumbnail?thumbnailProperties.thumbnailSize=LARGE`,
+          {
+            headers: { 'Authorization': 'Bearer ' + accessToken }
+          }
+        );
+
+        if (!response.ok) {
+          console.error('Failed to fetch thumbnail for page', pageObjectId);
+          return null;
+        }
+
+        const data = await response.json();
+        if (data.contentUrl) {
+          // Fetch the actual image
+          const imageBase64 = await fetchImageAsBase64(data.contentUrl);
+          return imageBase64;
+        }
+        return null;
+      } catch (err) {
+        console.error('Error fetching thumbnail:', err);
+        return null;
+      }
+    }
+
     async function fetchImageAsBase64(url) {
       try {
         // For Google-hosted images, we need to fetch with auth
@@ -565,7 +593,7 @@
 
       try {
         const presentation = await fetchPresentation(presentationId);
-        updateProgress(15, 'Processing slides...');
+        updateProgress(10, 'Processing slides...');
 
         const slides = presentation.slides || [];
         const pageSize = presentation.pageSize;
@@ -587,13 +615,27 @@
 
           processedSlides.push({
             index: i,
+            objectId: slide.objectId, // Need this for thumbnail API
             elements: elements
           });
         }
 
-        updateProgress(30, 'Fetching images...');
+        updateProgress(20, 'Fetching slide thumbnails...');
 
-        // Fetch all images
+        // Fetch thumbnails for each slide (reference images)
+        const thumbnailData = {};
+        for (let i = 0; i < slides.length; i++) {
+          const slide = slides[i];
+          const thumbnail = await fetchSlideThumbnail(presentationId, slide.objectId);
+          if (thumbnail) {
+            thumbnailData[slide.objectId] = thumbnail;
+          }
+          updateProgress(20 + (i / slides.length) * 25, `Fetching thumbnail ${i + 1} of ${slides.length}...`);
+        }
+
+        updateProgress(45, 'Fetching content images...');
+
+        // Fetch all content images
         const imageData = {};
         const imageUrlArray = Array.from(imageUrls);
         for (let i = 0; i < imageUrlArray.length; i++) {
@@ -602,7 +644,7 @@
           if (base64) {
             imageData[url] = base64;
           }
-          updateProgress(30 + (i / imageUrlArray.length) * 30, `Fetching image ${i + 1} of ${imageUrlArray.length}...`);
+          updateProgress(45 + (i / imageUrlArray.length) * 15, `Fetching image ${i + 1} of ${imageUrlArray.length}...`);
         }
 
         updateProgress(60, 'Creating Figma frames...');
@@ -616,7 +658,8 @@
               pageSize: pageSize,
               slides: processedSlides
             },
-            imageData: imageData
+            imageData: imageData,
+            thumbnailData: thumbnailData
           }
         }, '*');
 
