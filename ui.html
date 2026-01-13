@@ -851,9 +851,15 @@
       const runs = [];
 
       // Default alignment based on placeholder type
-      let currentAlignment = shapeContentAlignment || 'START';
-      if (placeholderType === 'CENTERED_TITLE' || placeholderType === 'SUBTITLE') {
+      // Note: shapeContentAlignment is VERTICAL alignment, not horizontal - don't use it here
+      let currentAlignment = 'START';
+
+      // Most title/subtitle placeholders in Google Slides are centered by default
+      if (placeholderType === 'CENTERED_TITLE' ||
+          placeholderType === 'TITLE' ||
+          placeholderType === 'SUBTITLE') {
         currentAlignment = 'CENTER';
+        console.log('Defaulting to CENTER alignment for placeholder:', placeholderType);
       }
 
       if (text.textElements) {
@@ -862,6 +868,7 @@
           if (textElement.paragraphMarker) {
             const paragraphStyle = textElement.paragraphMarker.style || {};
             if (paragraphStyle.alignment) {
+              console.log('Found explicit paragraph alignment:', paragraphStyle.alignment);
               currentAlignment = paragraphStyle.alignment;
             }
           }
