@@ -293,6 +293,38 @@ function createTextForShape(parent_1, element_1, x_1, y_1, width_1, height_1) {
             textNode.rotation = -element.rotation;
         }
         parent.appendChild(textNode);
+        // Now add highlight rectangles for text with background colors
+        // Must be done after appending to parent so getRangeBounds works
+        let highlightCharIndex = 0;
+        for (const run of element.text.runs) {
+            const runLength = run.text.length;
+            if (runLength === 0)
+                continue;
+            const startIdx = highlightCharIndex;
+            const endIdx = highlightCharIndex + runLength;
+            if (run.backgroundColor) {
+                try {
+                    // Get the bounds of this text range (using type assertion for newer API)
+                    const bounds = textNode.getRangeBounds(startIdx, endIdx);
+                    // Create a highlight rectangle
+                    const highlight = figma.createRectangle();
+                    highlight.name = 'Highlight';
+                    highlight.x = textNode.x + bounds.x;
+                    highlight.y = textNode.y + bounds.y;
+                    highlight.resize(bounds.width, bounds.height);
+                    highlight.fills = [{
+                            type: 'SOLID',
+                            color: run.backgroundColor
+                        }];
+                    // Insert highlight behind text (at the beginning of parent's children)
+                    parent.insertChild(0, highlight);
+                }
+                catch (err) {
+                    console.error('Failed to create highlight:', err);
+                }
+            }
+            highlightCharIndex = endIdx;
+        }
     });
 }
 function createImage(parent, element, x, y, width, height, imageData) {
