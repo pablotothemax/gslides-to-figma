@@ -542,21 +542,36 @@
 
     async function fetchImageAsBase64(url) {
       try {
-        // For Google-hosted images, we need to fetch with auth
-        const response = await fetch(url, {
-          headers: { 'Authorization': 'Bearer ' + accessToken }
-        });
+        // Google CDN URLs (thumbnails) are pre-signed and don't need auth
+        // In fact, they reject the Authorization header via CORS
+        const isGoogleCdn = url.includes('googleusercontent.com');
 
-        if (!response.ok) {
-          // Try without auth for public images
-          const publicResponse = await fetch(url);
-          if (!publicResponse.ok) return null;
-          const blob = await publicResponse.blob();
+        if (isGoogleCdn) {
+          // Fetch without auth for pre-signed Google CDN URLs
+          const response = await fetch(url);
+          if (!response.ok) {
+            console.error('CDN fetch failed:', response.status);
+            return null;
+          }
+          const blob = await response.blob();
+          return await blobToBase64(blob);
+        } else {
+          // For other Google-hosted images, try with auth first
+          const response = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + accessToken }
+          });
+
+          if (!response.ok) {
+            // Try without auth for public images
+            const publicResponse = await fetch(url);
+            if (!publicResponse.ok) return null;
+            const blob = await publicResponse.blob();
+            return await blobToBase64(blob);
+          }
+
+          const blob = await response.blob();
           return await blobToBase64(blob);
         }
-
-        const blob = await response.blob();
-        return await blobToBase64(blob);
       } catch (err) {
         console.error('Failed to fetch image:', err);
         return null;
