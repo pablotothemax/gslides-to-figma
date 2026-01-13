@@ -662,10 +662,9 @@
         const shape = element.shape;
         const shapeType = shape.shapeType || 'RECTANGLE';
 
-        // Log full shape data for debugging
-        console.log('Full shape data:', JSON.stringify(shape, null, 2));
-        console.log('Shape placeholder:', element.shape.placeholder);
-        console.log('Element size (pixels):', baseProps.width, 'x', baseProps.height);
+        // Get placeholder type for styling defaults
+        const placeholderType = shape.placeholder?.type || null;
+        console.log('Shape placeholder type:', placeholderType);
 
         // Get fill color
         let fillColor = null;
@@ -685,13 +684,12 @@
         let shapeContentAlignment = null;
         if (shape.shapeProperties?.contentAlignment) {
           shapeContentAlignment = shape.shapeProperties.contentAlignment;
-          console.log('Shape content alignment:', shapeContentAlignment);
         }
 
-        // Process text content with element dimensions for fallback sizing
+        // Process text content with placeholder type for fallback sizing
         let textContent = null;
         if (shape.text) {
-          textContent = processTextContent(shape.text, baseProps.height, shapeContentAlignment);
+          textContent = processTextContent(shape.text, placeholderType, shapeContentAlignment);
         }
 
         return {
@@ -729,7 +727,7 @@
               for (const cell of row.tableCells) {
                 let cellText = '';
                 if (cell.text) {
-                  const textContent = processTextContent(cell.text, 30, null); // Default small size for table cells
+                  const textContent = processTextContent(cell.text, null, null); // Table cells use default font size
                   cellText = textContent.runs.map(r => r.text).join('');
                 }
                 cells.push(cellText);
@@ -791,17 +789,13 @@
       return null;
     }
 
-    function processTextContent(text, elementHeight = 100, shapeContentAlignment = null) {
+    function processTextContent(text, placeholderType = null, shapeContentAlignment = null) {
       const runs = [];
-      let currentAlignment = shapeContentAlignment || 'START'; // Use shape alignment as default
 
-      // Debug: log the raw text structure
-      console.log('Raw text structure:', JSON.stringify(text, null, 2));
-      console.log('Element height for fallback:', elementHeight);
-
-      // Check for body/list default styles
-      if (text.lists) {
-        console.log('Text lists (may contain default styles):', text.lists);
+      // Default alignment based on placeholder type
+      let currentAlignment = shapeContentAlignment || 'START';
+      if (placeholderType === 'CENTERED_TITLE' || placeholderType === 'SUBTITLE') {
+        currentAlignment = 'CENTER';
       }
 
       if (text.textElements) {
@@ -809,10 +803,8 @@
           // Check for paragraph marker which contains alignment info
           if (textElement.paragraphMarker) {
             const paragraphStyle = textElement.paragraphMarker.style || {};
-            console.log('Paragraph style:', paragraphStyle);
             if (paragraphStyle.alignment) {
               currentAlignment = paragraphStyle.alignment;
-              console.log('Found alignment:', currentAlignment);
             }
           }
 
@@ -820,33 +812,31 @@
             const run = textElement.textRun;
             const style = run.style || {};
 
-            console.log('TextRun style:', style);
-            console.log('FontSize object:', style.fontSize);
-
             // Get font info
             let fontFamily = style.fontFamily || 'Arial';
             let fontSize = null;
 
             if (style.fontSize?.magnitude) {
               fontSize = style.fontSize.magnitude;
-              console.log('Extracted fontSize from style:', fontSize);
             }
 
-            // Fallback: estimate font size based on element height if not specified
-            // This is a heuristic for placeholder text that inherits from master slides
+            // Fallback: use placeholder type to determine font size
             if (!fontSize) {
-              // Estimate: text typically takes 40-60% of container height for titles
-              // Smaller elements = body text, larger = titles
-              if (elementHeight > 100) {
-                fontSize = Math.min(72, Math.max(24, elementHeight * 0.5));
-                console.log('Estimated fontSize from height:', fontSize);
-              } else if (elementHeight > 50) {
-                fontSize = Math.min(36, Math.max(14, elementHeight * 0.4));
-                console.log('Estimated fontSize from height (medium):', fontSize);
-              } else {
-                fontSize = 14; // Default for small elements
-                console.log('Using default fontSize:', fontSize);
+              switch (placeholderType) {
+                case 'CENTERED_TITLE':
+                case 'TITLE':
+                  fontSize = 44; // Standard title size
+                  break;
+                case 'SUBTITLE':
+                  fontSize = 22; // Standard subtitle size
+                  break;
+                case 'BODY':
+                  fontSize = 18; // Standard body size
+                  break;
+                default:
+                  fontSize = 14; // Default
               }
+              console.log(`Using placeholder-based fontSize (${placeholderType}):`, fontSize);
             }
 
             // Determine font weight and style
@@ -874,11 +864,8 @@
         }
       }
 
-      // Determine overall alignment (use first run's alignment, or shape alignment)
-      const alignment = runs.length > 0 ? runs[0].alignment : (shapeContentAlignment || 'START');
-
-      console.log('Processed runs:', runs);
-      console.log('Final alignment:', alignment);
+      // Determine overall alignment
+      const alignment = runs.length > 0 ? runs[0].alignment : currentAlignment;
 
       return { runs: runs, alignment: alignment };
     }

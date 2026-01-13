@@ -65,10 +65,18 @@ function importPresentation(presentation, imageData) {
             figma.ui.postMessage({ type: 'error', message: 'No slides found in presentation' });
             return;
         }
-        // Convert page size from EMU to pixels
+        // Fixed output size: 1920x1080
+        const targetWidth = 1920;
+        const targetHeight = 1080;
+        // Calculate original slide size from EMU
         const emuToPixels = (emu) => (emu || 0) / 914400 * 72;
-        const slideWidth = emuToPixels(((_b = (_a = presentation.pageSize) === null || _a === void 0 ? void 0 : _a.width) === null || _b === void 0 ? void 0 : _b.magnitude) || 9144000);
-        const slideHeight = emuToPixels(((_d = (_c = presentation.pageSize) === null || _c === void 0 ? void 0 : _c.height) === null || _d === void 0 ? void 0 : _d.magnitude) || 5143500);
+        const originalWidth = emuToPixels(((_b = (_a = presentation.pageSize) === null || _a === void 0 ? void 0 : _a.width) === null || _b === void 0 ? void 0 : _b.magnitude) || 9144000);
+        const originalHeight = emuToPixels(((_d = (_c = presentation.pageSize) === null || _c === void 0 ? void 0 : _c.height) === null || _d === void 0 ? void 0 : _d.magnitude) || 5143500);
+        // Calculate scale factor to fit content to 1920x1080
+        const scaleX = targetWidth / originalWidth;
+        const scaleY = targetHeight / originalHeight;
+        const scale = Math.min(scaleX, scaleY); // Maintain aspect ratio
+        console.log(`Original size: ${originalWidth}x${originalHeight}, Scale: ${scale}`);
         const createdFrames = [];
         const spacing = 100; // Space between slides
         for (let i = 0; i < slides.length; i++) {
@@ -78,15 +86,15 @@ function importPresentation(presentation, imageData) {
                 percent: 60 + (i / totalSlides) * 35,
                 text: `Creating slide ${i + 1} of ${totalSlides}...`
             });
-            // Create frame for slide
+            // Create frame for slide at fixed 1920x1080
             const frame = figma.createFrame();
             frame.name = `Slide ${i + 1}`;
-            frame.resize(slideWidth, slideHeight);
-            frame.x = i * (slideWidth + spacing);
+            frame.resize(targetWidth, targetHeight);
+            frame.x = i * (targetWidth + spacing);
             frame.y = 0;
             frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
-            // Create elements within the frame
-            yield createElements(frame, slide.elements, imageData);
+            // Create elements within the frame with scaling
+            yield createElements(frame, slide.elements, imageData, scale);
             figma.currentPage.appendChild(frame);
             createdFrames.push(frame);
         }
@@ -99,11 +107,11 @@ function importPresentation(presentation, imageData) {
         });
     });
 }
-function createElements(parent, elements, imageData) {
-    return __awaiter(this, void 0, void 0, function* () {
+function createElements(parent_1, elements_1, imageData_1) {
+    return __awaiter(this, arguments, void 0, function* (parent, elements, imageData, scale = 1) {
         for (const element of elements) {
             try {
-                yield createElement(parent, element, imageData);
+                yield createElement(parent, element, imageData, scale);
             }
             catch (err) {
                 console.error('Failed to create element:', err);
@@ -111,16 +119,16 @@ function createElements(parent, elements, imageData) {
         }
     });
 }
-function createElement(parent, element, imageData) {
-    return __awaiter(this, void 0, void 0, function* () {
-        // Apply scale to dimensions
-        const width = Math.max(1, element.width * Math.abs(element.scaleX));
-        const height = Math.max(1, element.height * Math.abs(element.scaleY));
-        const x = element.x;
-        const y = element.y;
+function createElement(parent_1, element_1, imageData_1) {
+    return __awaiter(this, arguments, void 0, function* (parent, element, imageData, scale = 1) {
+        // Apply scale to dimensions and positions
+        const width = Math.max(1, element.width * Math.abs(element.scaleX) * scale);
+        const height = Math.max(1, element.height * Math.abs(element.scaleY) * scale);
+        const x = element.x * scale;
+        const y = element.y * scale;
         switch (element.type) {
             case 'shape':
-                yield createShape(parent, element, x, y, width, height);
+                yield createShape(parent, element, x, y, width, height, scale);
                 break;
             case 'image':
                 yield createImage(parent, element, x, y, width, height, imageData);
@@ -129,16 +137,16 @@ function createElement(parent, element, imageData) {
                 createLine(parent, element, x, y, width, height);
                 break;
             case 'table':
-                yield createTable(parent, element, x, y, width, height);
+                yield createTable(parent, element, x, y, width, height, scale);
                 break;
             case 'group':
-                yield createGroup(parent, element, x, y, imageData);
+                yield createGroup(parent, element, x, y, imageData, scale);
                 break;
         }
     });
 }
-function createShape(parent, element, x, y, width, height) {
-    return __awaiter(this, void 0, void 0, function* () {
+function createShape(parent_1, element_1, x_1, y_1, width_1, height_1) {
+    return __awaiter(this, arguments, void 0, function* (parent, element, x, y, width, height, scale = 1) {
         let node;
         // Create appropriate shape based on type
         const shapeType = element.shapeType || 'RECTANGLE';
@@ -187,12 +195,12 @@ function createShape(parent, element, x, y, width, height) {
         parent.appendChild(node);
         // Handle text content
         if (element.text && element.text.runs.length > 0) {
-            yield createTextForShape(parent, element, x, y, width, height);
+            yield createTextForShape(parent, element, x, y, width, height, scale);
         }
     });
 }
-function createTextForShape(parent, element, x, y, width, height) {
-    return __awaiter(this, void 0, void 0, function* () {
+function createTextForShape(parent_1, element_1, x_1, y_1, width_1, height_1) {
+    return __awaiter(this, arguments, void 0, function* (parent, element, x, y, width, height, scale = 1) {
         if (!element.text)
             return;
         // Combine all text runs
@@ -205,10 +213,12 @@ function createTextForShape(parent, element, x, y, width, height) {
         const fontName = yield loadFont(firstRun.fontFamily, firstRun.fontWeight);
         textNode.fontName = fontName;
         textNode.characters = fullText;
-        textNode.fontSize = firstRun.fontSize || 14;
+        // Apply scale to font size
+        const baseFontSize = firstRun.fontSize || 14;
+        textNode.fontSize = Math.round(baseFontSize * scale);
         textNode.fills = [{ type: 'SOLID', color: firstRun.color }];
-        // Set text box to fill the shape with small padding
-        const padding = 4;
+        // Set text box to fill the shape with small padding (scaled)
+        const padding = 4 * scale;
         textNode.resize(Math.max(1, width - padding * 2), Math.max(1, height - padding * 2));
         textNode.x = x + padding;
         textNode.y = y + padding;
@@ -318,8 +328,8 @@ function createLine(parent, element, x, y, width, height) {
     line.strokeWeight = element.strokeWeight || 1;
     parent.appendChild(line);
 }
-function createTable(parent, element, x, y, width, height) {
-    return __awaiter(this, void 0, void 0, function* () {
+function createTable(parent_1, element_1, x_1, y_1, width_1, height_1) {
+    return __awaiter(this, arguments, void 0, function* (parent, element, x, y, width, height, scale = 1) {
         var _a, _b;
         const rows = element.rows || [];
         const rowCount = rows.length;
@@ -337,6 +347,8 @@ function createTable(parent, element, x, y, width, height) {
         const cellHeight = height / rowCount;
         // Load a default font
         const fontName = yield loadFont('Arial', 400);
+        const fontSize = Math.round(10 * scale);
+        const padding = 4 * scale;
         for (let row = 0; row < rowCount; row++) {
             for (let col = 0; col < colCount; col++) {
                 const cellText = ((_b = rows[row]) === null || _b === void 0 ? void 0 : _b[col]) || '';
@@ -347,17 +359,17 @@ function createTable(parent, element, x, y, width, height) {
                 cell.resize(cellWidth, cellHeight);
                 cell.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
                 cell.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
-                cell.strokeWeight = 1;
+                cell.strokeWeight = Math.max(1, scale);
                 tableFrame.appendChild(cell);
                 // Create cell text
                 if (cellText.trim()) {
                     const textNode = figma.createText();
                     textNode.fontName = fontName;
                     textNode.characters = cellText;
-                    textNode.fontSize = 10;
-                    textNode.x = col * cellWidth + 4;
-                    textNode.y = row * cellHeight + 4;
-                    textNode.resize(cellWidth - 8, cellHeight - 8);
+                    textNode.fontSize = fontSize;
+                    textNode.x = col * cellWidth + padding;
+                    textNode.y = row * cellHeight + padding;
+                    textNode.resize(cellWidth - padding * 2, cellHeight - padding * 2);
                     textNode.textAutoResize = 'TRUNCATE';
                     tableFrame.appendChild(textNode);
                 }
@@ -366,16 +378,16 @@ function createTable(parent, element, x, y, width, height) {
         parent.appendChild(tableFrame);
     });
 }
-function createGroup(parent, element, x, y, imageData) {
-    return __awaiter(this, void 0, void 0, function* () {
+function createGroup(parent_1, element_1, x_1, y_1, imageData_1) {
+    return __awaiter(this, arguments, void 0, function* (parent, element, x, y, imageData, scale = 1) {
         if (!element.children || element.children.length === 0)
             return;
         // Create elements and group them
         const nodes = [];
         for (const child of element.children) {
-            // Offset child positions by group position
-            const childElement = Object.assign(Object.assign({}, child), { x: x + child.x, y: y + child.y });
-            yield createElement(parent, childElement, imageData);
+            // Offset child positions by group position (positions already scaled by parent)
+            const childElement = Object.assign(Object.assign({}, child), { x: x / scale + child.x, y: y / scale + child.y });
+            yield createElement(parent, childElement, imageData, scale);
         }
     });
 }

@@ -126,10 +126,21 @@ async function importPresentation(presentation: Presentation, imageData: Record<
     return;
   }
 
-  // Convert page size from EMU to pixels
+  // Fixed output size: 1920x1080
+  const targetWidth = 1920;
+  const targetHeight = 1080;
+
+  // Calculate original slide size from EMU
   const emuToPixels = (emu: number) => (emu || 0) / 914400 * 72;
-  const slideWidth = emuToPixels(presentation.pageSize?.width?.magnitude || 9144000);
-  const slideHeight = emuToPixels(presentation.pageSize?.height?.magnitude || 5143500);
+  const originalWidth = emuToPixels(presentation.pageSize?.width?.magnitude || 9144000);
+  const originalHeight = emuToPixels(presentation.pageSize?.height?.magnitude || 5143500);
+
+  // Calculate scale factor to fit content to 1920x1080
+  const scaleX = targetWidth / originalWidth;
+  const scaleY = targetHeight / originalHeight;
+  const scale = Math.min(scaleX, scaleY); // Maintain aspect ratio
+
+  console.log(`Original size: ${originalWidth}x${originalHeight}, Scale: ${scale}`);
 
   const createdFrames: FrameNode[] = [];
   const spacing = 100; // Space between slides
@@ -143,16 +154,16 @@ async function importPresentation(presentation: Presentation, imageData: Record<
       text: `Creating slide ${i + 1} of ${totalSlides}...`
     });
 
-    // Create frame for slide
+    // Create frame for slide at fixed 1920x1080
     const frame = figma.createFrame();
     frame.name = `Slide ${i + 1}`;
-    frame.resize(slideWidth, slideHeight);
-    frame.x = i * (slideWidth + spacing);
+    frame.resize(targetWidth, targetHeight);
+    frame.x = i * (targetWidth + spacing);
     frame.y = 0;
     frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
 
-    // Create elements within the frame
-    await createElements(frame, slide.elements, imageData);
+    // Create elements within the frame with scaling
+    await createElements(frame, slide.elements, imageData, scale);
 
     figma.currentPage.appendChild(frame);
     createdFrames.push(frame);
@@ -171,11 +182,12 @@ async function importPresentation(presentation: Presentation, imageData: Record<
 async function createElements(
   parent: FrameNode | GroupNode,
   elements: SlideElement[],
-  imageData: Record<string, string>
+  imageData: Record<string, string>,
+  scale: number = 1
 ) {
   for (const element of elements) {
     try {
-      await createElement(parent, element, imageData);
+      await createElement(parent, element, imageData, scale);
     } catch (err) {
       console.error('Failed to create element:', err);
     }
@@ -185,17 +197,18 @@ async function createElements(
 async function createElement(
   parent: FrameNode | GroupNode,
   element: SlideElement,
-  imageData: Record<string, string>
+  imageData: Record<string, string>,
+  scale: number = 1
 ) {
-  // Apply scale to dimensions
-  const width = Math.max(1, element.width * Math.abs(element.scaleX));
-  const height = Math.max(1, element.height * Math.abs(element.scaleY));
-  const x = element.x;
-  const y = element.y;
+  // Apply scale to dimensions and positions
+  const width = Math.max(1, element.width * Math.abs(element.scaleX) * scale);
+  const height = Math.max(1, element.height * Math.abs(element.scaleY) * scale);
+  const x = element.x * scale;
+  const y = element.y * scale;
 
   switch (element.type) {
     case 'shape':
-      await createShape(parent, element, x, y, width, height);
+      await createShape(parent, element, x, y, width, height, scale);
       break;
     case 'image':
       await createImage(parent, element, x, y, width, height, imageData);
@@ -204,10 +217,10 @@ async function createElement(
       createLine(parent, element, x, y, width, height);
       break;
     case 'table':
-      await createTable(parent, element, x, y, width, height);
+      await createTable(parent, element, x, y, width, height, scale);
       break;
     case 'group':
-      await createGroup(parent, element, x, y, imageData);
+      await createGroup(parent, element, x, y, imageData, scale);
       break;
   }
 }
@@ -218,7 +231,8 @@ async function createShape(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
+  scale: number = 1
 ) {
   let node: SceneNode;
 
@@ -273,7 +287,7 @@ async function createShape(
 
   // Handle text content
   if (element.text && element.text.runs.length > 0) {
-    await createTextForShape(parent, element, x, y, width, height);
+    await createTextForShape(parent, element, x, y, width, height, scale);
   }
 }
 
@@ -283,7 +297,8 @@ async function createTextForShape(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
+  scale: number = 1
 ) {
   if (!element.text) return;
 
@@ -299,11 +314,15 @@ async function createTextForShape(
 
   textNode.fontName = fontName;
   textNode.characters = fullText;
-  textNode.fontSize = firstRun.fontSize || 14;
+
+  // Apply scale to font size
+  const baseFontSize = firstRun.fontSize || 14;
+  textNode.fontSize = Math.round(baseFontSize * scale);
+
   textNode.fills = [{ type: 'SOLID', color: firstRun.color }];
 
-  // Set text box to fill the shape with small padding
-  const padding = 4;
+  // Set text box to fill the shape with small padding (scaled)
+  const padding = 4 * scale;
   textNode.resize(Math.max(1, width - padding * 2), Math.max(1, height - padding * 2));
   textNode.x = x + padding;
   textNode.y = y + padding;
@@ -447,7 +466,8 @@ async function createTable(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
+  scale: number = 1
 ) {
   const rows = element.rows || [];
   const rowCount = rows.length;
@@ -468,6 +488,8 @@ async function createTable(
 
   // Load a default font
   const fontName = await loadFont('Arial', 400);
+  const fontSize = Math.round(10 * scale);
+  const padding = 4 * scale;
 
   for (let row = 0; row < rowCount; row++) {
     for (let col = 0; col < colCount; col++) {
@@ -480,7 +502,7 @@ async function createTable(
       cell.resize(cellWidth, cellHeight);
       cell.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
       cell.strokes = [{ type: 'SOLID', color: { r: 0.8, g: 0.8, b: 0.8 } }];
-      cell.strokeWeight = 1;
+      cell.strokeWeight = Math.max(1, scale);
       tableFrame.appendChild(cell);
 
       // Create cell text
@@ -488,10 +510,10 @@ async function createTable(
         const textNode = figma.createText();
         textNode.fontName = fontName;
         textNode.characters = cellText;
-        textNode.fontSize = 10;
-        textNode.x = col * cellWidth + 4;
-        textNode.y = row * cellHeight + 4;
-        textNode.resize(cellWidth - 8, cellHeight - 8);
+        textNode.fontSize = fontSize;
+        textNode.x = col * cellWidth + padding;
+        textNode.y = row * cellHeight + padding;
+        textNode.resize(cellWidth - padding * 2, cellHeight - padding * 2);
         textNode.textAutoResize = 'TRUNCATE';
         tableFrame.appendChild(textNode);
       }
@@ -506,7 +528,8 @@ async function createGroup(
   element: SlideElement,
   x: number,
   y: number,
-  imageData: Record<string, string>
+  imageData: Record<string, string>,
+  scale: number = 1
 ) {
   if (!element.children || element.children.length === 0) return;
 
@@ -514,14 +537,14 @@ async function createGroup(
   const nodes: SceneNode[] = [];
 
   for (const child of element.children) {
-    // Offset child positions by group position
+    // Offset child positions by group position (positions already scaled by parent)
     const childElement = {
       ...child,
-      x: x + child.x,
-      y: y + child.y
+      x: x / scale + child.x, // Undo parent scaling, let createElement apply it
+      y: y / scale + child.y
     };
 
-    await createElement(parent, childElement, imageData);
+    await createElement(parent, childElement, imageData, scale);
   }
 }
 

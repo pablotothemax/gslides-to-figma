@@ -203,13 +203,21 @@ function successPage(accessToken, sessionId) {
     }
     // Redirect to Figma and close window
     setTimeout(() => {
-      // Open Figma using deep link protocol
-      window.location.href = 'figma://';
-      // Close this window after a short delay
+      // Try to close first (works if opened via window.open)
+      window.close();
+      // If still open after 100ms, redirect to Figma
       setTimeout(() => {
-        window.close();
-      }, 500);
-    }, 1000);
+        // Use an iframe to trigger the deep link without navigating away
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = 'figma://';
+        document.body.appendChild(iframe);
+        // Try closing again
+        setTimeout(() => {
+          window.close();
+        }, 500);
+      }, 100);
+    }, 1500);
   </script>
 </body>
 </html>`;
